@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>サンドピクチャー</title>
+<script src="liquidfun.js"></script>
+<script>
+let canvas, context;                            //キャンバス
+let preCanvas, preContext;                      //プリレンダリング用キャンバス
+let g = 0.5, r = 2;                             //重力加速度、砂の大きさ
+const world = new b2World(new b2Vec2(0, g));    //物理ワールド
+const lines = new Array();                      //障害物
+let ps = null;                                  //パーティクル
+
+const init = () => {
+    //キャンバスの取得
+    canvas = document.getElementById("world");      //キャンバスを取得
+    context = canvas.getContext("2d");
+    preCanvas = document.createElement("canvas");   //一時描画用キャンバスを作成
+    preCanvas.width = canvas.width;                 //大きさをキャンバスに合わせる
+    preCanvas.height = canvas.height;
+    preContext = preCanvas.getContext("2d");
+    //枠を作成
+    setLine(0, 0, 6, 0);                            //物理ワールドを長さ6の4つの線で囲む
+    setLine(6, 0, 6, 6);
+    setLine(6, 6, 0, 6);
+    setLine(0, 6, 0, 0);
+    //障害物、パーティクル（砂）を作成
+    reset(0);
+    //描画
+    render();
+}
+
+const setLine = (x1, y1, x2, y2) => {
+    //ラインの作成
+    const shape = new b2ChainShape();               //鎖状のオブジェクトを作成
+    shape.vertices.push(new b2Vec2(x1, y1));        //オブジェクトの始点、終点を指定
+    shape.vertices.push(new b2Vec2(x2, y2));
+    const line = world.CreateBody(new b2BodyDef()); //動かない剛体を作成
+    line.CreateFixtureFromShape(shape, 0);          //形状と密度(0)をセット
+    return line;
+}
+
+const initLines = () => {
+    //障害物を削除
+    for (const line of lines) {
+        world.DestroyBody(line);                    //障害物を削除
+    }
+    //障害物を作成
+    const pos = new Array(5)                        //要素数5個の配列posを作成
+    for (let i=0; i<pos.length; i++) {
+        const w = 100 * (i+1);
+        pos[i] = Math.floor(Math.random() * 100 + w) / 100;  //障害物の横位置を表す乱数
+    }
+    const d = r / 100 * 2;
+    lines[0] = setLine(d*2, 2.9, pos[0] - d, 3.1);          //砂の大きさの4倍の隙間を空けて6本の線をジグザグに作成
+    lines[1] = setLine(pos[0] + d, 3.1, pos[1] - d, 2.9);
+    lines[2] = setLine(pos[1] + d, 2.9, pos[2] - d, 3.1);
+    lines[3] = setLine(pos[2] + d, 3.1, pos[3] - d, 2.9);
+    lines[4] = setLine(pos[3] + d, 2.9, pos[4] - d, 3.1);
+    lines[5] = setLine(pos[4] + d, 3.1, 6 - d*2, 2.9);
+}
+
+const initPS = (x, y) => {
+    //パーティクルを削除
+    if (ps != null) {
+       world.DestroyParticleSystem(ps);
+    }
+    //パーティクルを作成
+    const particleSystemDef = new b2ParticleSystemDef();        //半径r÷100のパーティクルを定義
+    particleSystemDef.radius = r / 100;
+    const particleGroupDef = new b2ParticleGroupDef();          //幅6×高さ2の長方形のパーティクルグループを作成
+    const box = new b2PolygonShape();
+    box.SetAsBoxXYCenterAngle(3, 1, new b2Vec2(0, 1), 0);
+    particleGroupDef.shape = box;
+    particleGroupDef.position = new b2Vec2(x, y);               //パーティクルグループの初期位置
+    particleGroupDef.flags = b2_powderParticle;                 //パーティクルの種類は、砂
+    ps = world.CreateParticleSystem(particleSystemDef);
+    ps.CreateParticleGroup(particleGroupDef);
+}
+
+const render = () => {
+    //色の取得
+    const color = new Array();
+    for (let i=0; i<7; i++) {
+        color[i] = document.getElementById("color_"+i).value;                   //砂と背景の色を取得
+    }
+    //背景の描画
+    const grad = preContext.createLinearGradient(0, 0, 0, preCanvas.height);    //グラデーションを作成
+    grad.addColorStop(0.0, color[4]);                                          //グラデーションの色を指定
+    grad.addColorStop(0.5, color[5]);
+    grad.addColorStop(1.0, color[6]);
+    preContext.fillStyle = grad;
+    preContext.fillRect(0, 0, preCanvas.width, preCanvas.height);
+    //パーティクルの描画
+    const buffer = ps.GetPositionBuffer();                  //砂のひとつぶひとつぶの座標を取得
+    let index = 0, oIndex = -1;
+    for (let i=0; i<buffer.length; i+=2) {                  //砂の順番によって色を変える
+       if (i > buffer.length/4) index = 1;
+       if (i > buffer.length/2) index = 2;
+       if (i > buffer.length/4*3) index = 3;
+       if (index != oIndex) {
+           preContext.fillStyle = color[index];
+           oIndex = index;
+       }
+       preContext.fillRect(buffer[i]*100, buffer[i+1]*100, r, r);   //砂の一粒を正方形として描く
+    }
+    //プリレンダリング→キャンバス
+    if (g < 0) {
+        //重力が上方向の時は180度回転
+        context.save();
+        context.translate(600, 600);
+        context.rotate(Math.PI);            //キャンバスを180度回転
+        context.drawImage(preCanvas, 0, 0); //一次描画キャンバスを表示用のキャンバスにコピー
+        context.restore();
+    } else {
+        context.drawImage(preCanvas, 0, 0);
+    }
+    //更新
+    world.Step(1/60, 1, 1)                  //60分の1秒ごとに物理ワールドを更新
+    window.requestAnimationFrame(render);   //アニメーションを行う
+}
+
+const changeGravity = n => {
+    //重力を変更
+    g = Math.sign(g) * document.getElementById("g").value;  //重力加速度の値
+    g *= n;
+    world.SetGravity(new b2Vec2(0, g));
+}
+
+const reset = n => {
+    //障害物、パーティクルの再作成
+    if (n == 0) {
+        //砂の大きさと重力を初期値にもどす
+        document.getElementById("r").value = 2;      //砂の大きさを初期値の２にする
+        document.getElementById("g").value = 0.5
+    }
+    r = document.getElementById("r").value;
+    changeGravity(1);
+    document.getElementById("rText").innerText = r;     //砂の大きさに砂の大きさを表示
+    document.getElementById("gText").innerText = Math.abs(g);   //重力加速度に重力加速度の絶対値を表示
+    initLines();
+    if (g > 0) {        //砂のパーティクルグループの長方形を、重力がプラスなら上方に、マイナスなら下方に置く
+       initPS(3, 0);    
+    } else {
+       initPS(3, 4);
+    }
+}
+</script>
+<style>
+span {font-size: small;}
+canvas {border: thin solid #000000;}
+</style>
+</head>
+<body onload="init()">
+<p>サンドピクチャー</p>
+<input type="button" value="リセット" onclick="reset(0)">
+<input type="button" value="180°回転" onclick="changeGravity(-1)">
+砂の色:<input type="color" id="color_0" value="#FFFFCC">
+<input type="color" id="color_1" value="#FFCCFF">
+<input type="color" id="color_2" value="#33CC66">
+<input type="color" id="color_3" value="#3366CC">
+背景色:<input type="color" id="color_4" value="#CC3366">
+<input type="color" id="color_5" value="#3399CC">
+<input type="color" id="color_6" value="#000000">
+<hr>
+砂の大きさ:
+<input type="range" id="r" value="2" min="1" max="3" step="0.5">
+重力加速度:
+<input type="range" id="g" value="0.5" min="0.1" max="2" step="0.1">
+<input type="button" value="変更" onclick="reset(1)">
+<span>(砂の大きさ=<span id="rText">2</span>
+重力加速度=<span id="gText">0.5</span>) </span>
+<hr>
+<canvas id="world" width="600" height="600"></canvas>
+</body>
+</html>
+
+
